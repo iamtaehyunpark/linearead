@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Linearead Demo</title>
+  <style>
+    body {
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.8;
+      color: #333;
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 60px 20px;
+      background: #fafaf7;
+    }
+    article { background: white; padding: 48px; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    h1 { font-size: 2rem; margin-bottom: 0.3em; }
+    p { margin-bottom: 1.4em; font-size: 1.125rem; }
+    .hint { position:fixed;bottom:24px;right:24px;background:rgba(0,0,0,0.7);color:white;padding:10px 16px;border-radius:8px;font-family:sans-serif;font-size:0.85rem;pointer-events:none;opacity:0.9; }
+  </style>
+</head>
+<body>
+  <article>
+    <h1>The Future of Text Layout</h1>
+
+    <p>The web renders text through a pipeline that was designed thirty years ago for static documents. A browser loads a font, shapes the text into glyphs, measures their combined width, determines where lines break, and positions each line vertically. Every step depends on the previous one. Every step requires the rendering engine to consult its internal layout tree — a structure so expensive to maintain that browsers guard access to it behind synchronous reflow barriers that can freeze the main thread for tens of milliseconds at a time.</p>
+
+    <p>For a paragraph in a blog post, this pipeline is invisible. The browser loads, lays out, and paints before the reader's eye has traveled from the address bar to the first word. But the web is no longer a collection of static documents. It is a platform for applications, and those applications need to know about text in ways the original pipeline never anticipated.</p>
+
+    <p>A messaging application needs to know the exact height of every message bubble before rendering a virtualized list. A masonry layout needs the height of every card to position them without overlap. An editorial page needs text to flow around images, advertisements, and interactive elements. A responsive dashboard needs to resize and reflow text in real time as the user drags a panel divider.</p>
+
+    <p>Every one of these operations requires text measurement. And every text measurement on the web today requires a synchronous layout reflow. The cost is devastating. Measuring the height of a single text block forces the browser to recalculate the position of every element on the page. When you measure five hundred text blocks in sequence, you trigger five hundred full layout passes.</p>
+
+    <p>What if text measurement did not require the DOM at all? What if you could compute exactly where every line of text would break, exactly how wide each line would be, and exactly how tall the entire text block would be, using nothing but arithmetic?</p>
+
+    <p>This is the core insight of pretext. The browser's canvas API includes a measureText method that returns the width of any string in any font without triggering a layout reflow. Canvas measurement uses the same font engine as DOM rendering — the results are identical. But because it operates outside the layout tree, it carries no reflow penalty.</p>
+  </article>
+
+  <div class="hint">← → Swipe horizontally over a paragraph to slide</div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
