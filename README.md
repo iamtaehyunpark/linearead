@@ -1,12 +1,39 @@
-# Linearead Reader
+# Linearead Chrome Extension
 
-A text-reading interface (Library) that minimizes cognitive load and ocular fatigue by eliminating the "Return Sweep" (the large eye movement required to travel from the end of one line to the start of the next). 
-
-It utilizes a Horizontal-Vertical Hybrid Scroll mechanism to keep the user’s gaze fixed at a central "Focus Zone," and uses the `@chenglou/pretext` library for exact text measurement and layout calculation.
+A high-performance "Sliding Focus" text reader that eliminates the cognitive load of the "Return Sweep." Linearead keeps your gaze fixed at a stable eye level by reflowing text dynamically around a moving blank row (the Gap).
 
 ## Features
 
-- **Sliding Focus:** Horizontal scrolling slides the current line out to the left while the next line slides in from the right on the same Y-axis. Eye position stays fixed.
-- **Pretext Integration:** Zero-latency text layout measurements and rendering.
-- **Dual-Axis Control:** Vertical for navigation, Horizontal for sliding-line logic.
-- **Hinge Logic:** A snap/hinge effect at the end of each line to control pacing.
+- **The One Gap Model**: A single blank row separates read text from unread text.
+- **Dynamic Reflow**: Text moves upward into the buffer as you swipe horizontally, eliminating the need for your eyes to travel back to the left margin.
+- **Smart Injection**: Works on any website (Wikipedia, news sites, blogs) by clicking the extension icon. No page refresh required after installation.
+- **Status Indicator**: An "ON" badge appears on the extension icon when the reader is active in the current tab.
+- **Strict Marker**: A small black triangle tracks your exact reading position.
+- **Zero-Latency**: Built on [`@chenglou/pretext`](https://github.com/chenglou/pretext) for sub-pixel accurate layout without layout thrashing.
+
+## Installation (Developer Mode)
+
+1. Clone the repository and install dependencies:
+   ```bash
+   npm install
+   ```
+2. Build the extension:
+   ```bash
+   npm run build
+   ```
+3. Open Google Chrome and navigate to `chrome://extensions`.
+4. Enable **Developer mode** (top right toggle).
+5. Click **Load unpacked** and select the `dist` folder in the project directory.
+
+## Usage
+
+- **Toggle**: Click the Linearead extension icon in your browser bar to turn the reader on or off for the current page.
+- **Reading**: Swipe horizontally (using your trackpad or mouse wheel) over any paragraph to slide the text.
+
+## Standalone Demo
+
+For local development and testing, you can run:
+```bash
+npm run dev
+```
+This will open the demo page (`index.html`) where Linearead is always initialized by default.

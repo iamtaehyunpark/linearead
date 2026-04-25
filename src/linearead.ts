@@ -1,10 +1,4 @@
 // Linearead — minimal "One Gap" text reader.
-//
-// Logic:
-// 1. One blank line (the Gap) separates read text from unread text.
-// 2. As the user swipes horizontally, words move from below the gap to above it.
-// 3. When a full line is consumed, the Gap moves down one row.
-// 4. Marker strictly follows the width of consumed text (snapping to characters).
 
 import {
   prepareWithSegments,
@@ -24,6 +18,38 @@ type PositionedLine = {
   y: number
   text: string
 }
+
+type Block = {
+  source: HTMLElement
+  stage: HTMLDivElement
+  pool: HTMLSpanElement[]
+  marker: HTMLDivElement
+  prepared: PreparedTextWithSegments
+  originalLines: LayoutLine[]
+  font: string
+  lineHeight: number
+  containerWidth: number
+  color: string
+  consumedLines: string[]
+
+  pixelOffset: number
+  targetOffset: number
+  focusLineIdx: number
+  locked: boolean
+  scrollSessionEnded: boolean
+  scrollEndTimer: number
+  animating: boolean
+  active: boolean
+
+  // Cleanup references
+  wheelHandler: (e: WheelEvent) => void
+  enterHandler: () => void
+  leaveHandler: () => void
+  originalStyles: { color: string; position: string; minHeight: string }
+}
+
+const blocks: Block[] = []
+let scheduledRaf: number | null = null
 
 // ---------------------------------------------------------------------------
 // syncPool
@@ -46,37 +72,6 @@ function syncPool(
 }
 
 // ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-type Block = {
-  source: HTMLElement
-  stage: HTMLDivElement
-  pool: HTMLSpanElement[]
-  marker: HTMLDivElement
-  prepared: PreparedTextWithSegments
-  originalLines: LayoutLine[]
-  font: string
-  lineHeight: number
-  containerWidth: number
-  color: string
-  consumedLines: string[]
-
-  pixelOffset: number
-  targetOffset: number
-  velocity: number
-  focusLineIdx: number
-  locked: boolean
-  scrollSessionEnded: boolean
-  scrollEndTimer: number
-  animating: boolean
-  active: boolean
-}
-
-const blocks: Block[] = []
-let scheduledRaf: number | null = null
-
-// ---------------------------------------------------------------------------
 // Build projection
 // ---------------------------------------------------------------------------
 
@@ -85,7 +80,6 @@ function buildProjection(b: Block): { lines: PositionedLine[]; gapY: number; con
   let currentRow = 0
   let consumedWidth = 0
 
-  // 1. Fully read lines at top
   for (const text of b.consumedLines) {
     lines.push({ x: 0, y: Math.round(currentRow * b.lineHeight), text })
     currentRow++
@@ -94,7 +88,6 @@ function buildProjection(b: Block): { lines: PositionedLine[]; gapY: number; con
   const origFocus = b.originalLines[b.focusLineIdx]
   if (!origFocus) return { lines, gapY: currentRow * b.lineHeight, consumedWidth: 0 }
 
-  // 2. Current displaced words (progress in current line)
   let consumedCursor: LayoutCursor = origFocus.start
   if (b.pixelOffset > 0) {
     const consumed = layoutNextLine(b.prepared, origFocus.start, b.pixelOffset)
@@ -106,11 +99,9 @@ function buildProjection(b: Block): { lines: PositionedLine[]; gapY: number; con
     }
   }
 
-  // 3. THE GAP (one blank line)
   const gapY = currentRow * b.lineHeight
   currentRow++
 
-  // 4. Focus line + future lines (refilled)
   let cursor = consumedCursor
   while (cursor.segmentIndex < b.prepared.segments.length) {
     const line = layoutNextLine(b.prepared, cursor, b.containerWidth)
@@ -124,14 +115,36 @@ function buildProjection(b: Block): { lines: PositionedLine[]; gapY: number; con
 }
 
 // ---------------------------------------------------------------------------
-// Init
+// Lifecycle
 // ---------------------------------------------------------------------------
 
 export async function init(selector: string = 'article p'): Promise<void> {
+  if (blocks.length > 0) return // Already active
   await document.fonts.ready
   const targets = document.querySelectorAll<HTMLElement>(selector)
   for (let i = 0; i < targets.length; i++) {
     augment(targets[i]!)
+  }
+}
+
+export function destroy(): void {
+  while (blocks.length > 0) {
+    const b = blocks.pop()!
+    // Restore styles
+    b.source.style.color = b.originalStyles.color
+    b.source.style.position = b.originalStyles.position
+    b.source.style.minHeight = b.originalStyles.minHeight
+    // Remove listeners
+    b.source.removeEventListener('wheel', b.wheelHandler)
+    b.source.removeEventListener('pointerenter', b.enterHandler)
+    b.source.removeEventListener('pointerleave', b.leaveHandler)
+    // Remove stage
+    b.stage.remove()
+    clearTimeout(b.scrollEndTimer)
+  }
+  if (scheduledRaf !== null) {
+    cancelAnimationFrame(scheduledRaf)
+    scheduledRaf = null
   }
 }
 
@@ -149,6 +162,12 @@ function augment(source: HTMLElement): void {
   const result = layoutWithLines(prepared, containerWidth, lineHeight)
   if (result.lines.length === 0) return
 
+  const originalStyles = {
+    color: source.style.color,
+    position: source.style.position,
+    minHeight: source.style.minHeight
+  }
+
   source.style.color = 'transparent'
   source.style.position = 'relative'
 
@@ -158,6 +177,7 @@ function augment(source: HTMLElement): void {
   stage.style.left = '0'
   stage.style.width = `${containerWidth}px`
   stage.style.pointerEvents = 'none'
+  stage.style.zIndex = '9999'
   source.appendChild(stage)
 
   const marker = document.createElement('div')
@@ -169,38 +189,20 @@ function augment(source: HTMLElement): void {
   marker.style.borderTop = '7px solid black'
   marker.style.display = 'none'
   marker.style.pointerEvents = 'none'
+  marker.style.zIndex = '10000'
   stage.appendChild(marker)
 
-  const block: Block = {
-    source, stage, pool: [], marker, prepared,
-    originalLines: result.lines,
-    font, lineHeight, containerWidth, color,
-    consumedLines: [],
-    pixelOffset: 0,
-    targetOffset: 0,
-    velocity: 0,
-    focusLineIdx: 0,
-    locked: false,
-    scrollSessionEnded: false,
-    scrollEndTimer: 0,
-    animating: false,
-    active: false,
-  }
+  let block: Block
 
-  blocks.push(block)
-  projectText(block)
-
-  source.addEventListener('pointerenter', () => { block.active = true })
-  source.addEventListener('pointerleave', () => { block.active = false })
-  source.addEventListener('wheel', (e: WheelEvent) => {
-    if (!block.active) return
+  const wheelHandler = (e: WheelEvent) => {
+    if (!block || !block.active) return
     if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
     e.preventDefault()
 
     clearTimeout(block.scrollEndTimer)
     block.scrollEndTimer = window.setTimeout(() => {
       block.scrollSessionEnded = true
-    }, 32)
+    }, 20)
 
     if (block.locked) {
       if (block.scrollSessionEnded) {
@@ -211,12 +213,10 @@ function augment(source: HTMLElement): void {
       }
     }
 
-    block.targetOffset += e.deltaX * 1.0
+    block.targetOffset += e.deltaX
     if (block.targetOffset < 0) block.targetOffset = 0
-    const maxOff = block.containerWidth
-    if (block.targetOffset > maxOff) block.targetOffset = maxOff
+    if (block.targetOffset > block.containerWidth) block.targetOffset = block.containerWidth
 
-    // Backward snap
     if (e.deltaX < 0 && block.targetOffset <= 0 && block.focusLineIdx > 0) {
       block.consumedLines.pop()
       block.focusLineIdx--
@@ -224,34 +224,55 @@ function augment(source: HTMLElement): void {
       block.targetOffset = prevLine.width
       block.pixelOffset = prevLine.width
       block.locked = true
-      block.scrollSessionEnded = false // Reset session on snap!
-      // window.scrollBy(0, -block.lineHeight)
+      block.scrollSessionEnded = false
     }
 
     if (!block.animating) {
       block.animating = true
       scheduleRender()
     }
-  }, { passive: false })
+  }
+
+  const enterHandler = () => { if (block) block.active = true }
+  const leaveHandler = () => { if (block) block.active = false }
+
+  block = {
+    source, stage, pool: [], marker, prepared,
+    originalLines: result.lines,
+    font, lineHeight, containerWidth, color,
+    consumedLines: [],
+    pixelOffset: 0,
+    targetOffset: 0,
+    focusLineIdx: 0,
+    locked: false,
+    scrollSessionEnded: false,
+    scrollEndTimer: 0,
+    animating: false,
+    active: false,
+    wheelHandler, enterHandler, leaveHandler, originalStyles
+  }
+
+  blocks.push(block)
+  projectText(block)
+
+  source.addEventListener('pointerenter', enterHandler)
+  source.addEventListener('pointerleave', leaveHandler)
+  source.addEventListener('wheel', wheelHandler, { passive: false })
 }
 
 function projectText(b: Block): void {
   const origFocus = b.originalLines[b.focusLineIdx]
-
   if (origFocus && b.pixelOffset >= origFocus.width && b.focusLineIdx < b.originalLines.length - 1) {
     b.consumedLines.push(origFocus.text)
     b.pixelOffset = 0
     b.targetOffset = 0
     b.focusLineIdx++
-    b.velocity = 0
     b.locked = true
-    b.scrollSessionEnded = false // Reset session on snap!
+    b.scrollSessionEnded = false
     b.animating = false
-    // window.scrollBy(0, b.lineHeight)
   }
 
   const { lines, gapY, consumedWidth } = buildProjection(b)
-
   const lastLine = lines[lines.length - 1]
   const stageHeight = lastLine ? lastLine.y + b.lineHeight + 20 : 500
   b.stage.style.height = `${stageHeight}px`
@@ -276,7 +297,6 @@ function projectText(b: Block): void {
   }
 
   if (b.pixelOffset > 0 && origFocus) {
-    // Center the 10px wide triangle at the position
     b.marker.style.left = `${origFocus.width - consumedWidth - 5}px`
     b.marker.style.top = `${gapY + b.lineHeight}px`
     b.marker.style.display = ''
@@ -292,16 +312,13 @@ function scheduleRender(): void {
 
 function tick(): void {
   scheduledRaf = null
-
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]!
     if (!b.animating) continue
-
     if (b.locked) {
       b.animating = false
       continue
     }
-
     b.pixelOffset = b.targetOffset
     projectText(b)
     b.animating = false
